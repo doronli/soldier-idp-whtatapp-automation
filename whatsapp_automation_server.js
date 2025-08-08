@@ -4,6 +4,7 @@ const path = require("path");
 const { chromium } = require("playwright");
 
 const CONFIG_FILE = path.join(__dirname, "whatsapp_groups.json");
+const SESSION_FILE = path.join(__dirname, "session.json");
 
 const app = express();
 const PORT = 3000;
@@ -22,57 +23,99 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 function loadConfig() {
-  return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
-}
-
-function getGroupConfig(groups, groupName) {
-  return groups.find((g) => g.name.trim() === groupName.trim());
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+  } catch (err) {
+    console.error("Error loading config:", err.message);
+    return [];
+  }
 }
 
 app.post("/send", async (req, res) => {
   const { message } = req.body;
   if (!message) {
-    return res.status(400).json({ error: "message is required" });
+    return res.status(400).json({ error: "Message is required" });
   }
+
   const groups = loadConfig();
   if (!groups.length) {
-    return res.status(404).json({ error: "No groups found" });
+    return res.status(404).json({ error: "No groups found in config" });
   }
+
+  let browser;
   try {
-    const browser = await chromium.launch({ headless: false });
+    browser = await chromium.launch({ headless: false, slowMo: 50 });
     const context = await browser.newContext({
-      storageState: path.join(__dirname, "whatsapp_groups.json"),
+      storageState: fs.existsSync(SESSION_FILE) ? SESSION_FILE : undefined,
     });
     const page = await context.newPage();
     await page.goto("https://web.whatsapp.com/");
-    await page.waitForSelector('div[title="Search input textbox"]', {
-      timeout: 0,
-    });
-    // Wait for user to scan QR code if needed
-    console.log(
-      "Scan QR code if needed, then press Enter in the terminal to continue..."
-    );
-    await new Promise((resolve) => process.stdin.once("data", resolve));
-    for (const group of groups) {
-      const fullMessage = `${message}\n${group.suffix}`;
-      await page.click('div[title="Search input textbox"]');
-      await page.fill('div[title="Search input textbox"]', group.name);
-      await page.waitForTimeout(2000);
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(2000);
-      const msgBox = await page.waitForSelector('div[title="Type a message"]', {
-        timeout: 10000,
-      });
-      await msgBox.click();
-      await msgBox.type(fullMessage);
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(1000);
-      console.log(`Message sent to group: ${group.name}`);
+
+    const qrCodeSelector = 'canvas[aria-label*="Scan this QR code"]';
+    const searchBoxSelector = 'div[contenteditable="true"][data-tab="3"]'; // UPDATED
+    const msgBoxSelector = 'div[contenteditable="true"][data-tab="10"]'; // UPDATED
+
+    const isQRCodePresent = await page
+      .waitForSelector(qrCodeSelector, { timeout: 5000 })
+      .catch(() => null);
+
+    if (isQRCodePresent) {
+      console.log("QR code detected. Please scan with your WhatsApp app.");
+      await page.waitForSelector(searchBoxSelector, { timeout: 60000 });
+      await context.storageState({ path: SESSION_FILE });
+      console.log("Session saved to", SESSION_FILE);
+    } else {
+      await page.waitForSelector(searchBoxSelector, { timeout: 50000 });
     }
-    await browser.close();
-    res.json({ status: `Message sent to all groups!` });
+
+    await page.waitForTimeout(2000);
+
+    const sentGroups = [];
+    const failedGroups = [];
+
+    for (const group of groups) {
+      try {
+        const fullMessage = `${message}\n${group.suffix || ""}`;
+
+        // Search group
+        await page.click(searchBoxSelector);
+        await page.keyboard.down("Control");
+        await page.keyboard.press("A");
+        await page.keyboard.up("Control");
+        await page.keyboard.press("Backspace");
+
+        await page.type(searchBoxSelector, group.name);
+        await page.waitForTimeout(1500);
+
+        const groupSelector = `span[title="${group.name}"]`;
+        await page.waitForSelector(groupSelector, { timeout: 10000 });
+        await page.click(groupSelector);
+
+        // Type & send message
+        const msgBox = await page.waitForSelector(msgBoxSelector, {
+          timeout: 10000,
+        });
+        await msgBox.click();
+        await page.type(msgBoxSelector, fullMessage);
+        await page.keyboard.press("Enter");
+
+        await page.waitForTimeout(1000);
+        console.log(`✅ Message sent to group: ${group.name}`);
+        sentGroups.push(group.name);
+      } catch (err) {
+        console.error(`❌ Failed to send to ${group.name}:`, err.message);
+        failedGroups.push({ group: group.name, error: err.message });
+      }
+    }
+
+    // await browser.close();
+    res.json({ status: "Message sending completed", sentGroups, failedGroups });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Error in /send endpoint:", err.message);
+    if (browser) await browser.close();
+    res
+      .status(500)
+      .json({ error: "Failed to process request: " + err.message });
   }
 });
 
