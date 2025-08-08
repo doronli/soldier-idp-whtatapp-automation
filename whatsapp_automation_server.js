@@ -56,7 +56,6 @@ app.post("/send", async (req, res) => {
 
     const qrCodeSelector = 'canvas[aria-label*="Scan this QR code"]';
     const searchBoxSelector = 'div[contenteditable="true"][data-tab="3"]';
-    // message box will be found dynamically as the last contenteditable
 
     const isQRCodePresent = await page
       .waitForSelector(qrCodeSelector, { timeout: 5000 })
@@ -76,20 +75,21 @@ app.post("/send", async (req, res) => {
     const sentGroups = [];
     const failedGroups = [];
 
-    // choose correct modifier for focus shortcut
     const searchShortcut =
       process.platform === "darwin" ? "Meta+K" : "Control+K";
 
     for (const group of groups) {
       try {
-        const fullMessage = `${message}\n${group.suffix || ""}`;
+        // Combine into one trimmed message
+        const suffix = group.suffix ? ` ${group.suffix}` : "";
+        const fullMessage = `${message}${suffix}`.trim();
 
         // Focus chat search
         await page.keyboard.press(searchShortcut);
         await page.waitForSelector(searchBoxSelector, { timeout: 5000 });
         await page.click(searchBoxSelector);
 
-        // Clear previous text
+        // Clear search box
         await page.keyboard.down(
           process.platform === "darwin" ? "Meta" : "Control"
         );
@@ -103,20 +103,38 @@ app.post("/send", async (req, res) => {
         await page.keyboard.type(group.name, { delay: 50 });
         await page.waitForTimeout(1000);
 
-        // Click first search result instead of exact match
+        // Click first search result
         const firstResultSelector = 'div[role="grid"] div[tabindex="0"]';
         await page.waitForSelector(firstResultSelector, { timeout: 10000 });
         await page.click(firstResultSelector);
         await page.waitForTimeout(800);
 
-        // Find message input dynamically
+        // Find message box dynamically
         const editables = page.locator('div[contenteditable="true"]');
         const editableCount = await editables.count();
         if (editableCount === 0) throw new Error("No message input found.");
         const msgBox = editables.nth(editableCount - 1);
 
+        // Click and clear message box
         await msgBox.click();
-        await msgBox.type(fullMessage, { delay: 20 });
+        await page.keyboard.down(
+          process.platform === "darwin" ? "Meta" : "Control"
+        );
+        await page.keyboard.press("A");
+        await page.keyboard.up(
+          process.platform === "darwin" ? "Meta" : "Control"
+        );
+        await page.keyboard.press("Backspace");
+
+        // Paste full message directly (avoids double sends)
+        await page.evaluate((text) => {
+          const el = document.activeElement;
+          el.innerHTML = "";
+          el.focus();
+          document.execCommand("insertText", false, text);
+        }, fullMessage);
+
+        // Send once
         await page.keyboard.press("Enter");
 
         await page.waitForTimeout(1000);
@@ -127,9 +145,6 @@ app.post("/send", async (req, res) => {
         failedGroups.push({ group: group.name, error: err.message });
       }
     }
-
-    // NOTE: browser is kept open (commented out originally). Uncomment to close:
-    // await browser.close();
 
     res.json({ status: "Message sending completed", sentGroups, failedGroups });
   } catch (err) {
