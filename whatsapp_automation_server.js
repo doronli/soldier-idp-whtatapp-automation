@@ -9,6 +9,13 @@ const SCHEDULE_FILE = path.join(__dirname, "scheduled_messages.json");
 
 const MIN_DELAY_MS = 30 * 1000; // 30s
 const MAX_FUTURE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// --- Persistent session constants (Step 1) ---
+const USER_DATA_DIR = path.join(__dirname, ".chromium-profile");
+const PERSISTENT = process.env.WA_PERSISTENT !== "false"; // default true
+const LOGIN_TIMEOUT_MS =
+  parseInt(process.env.WA_LOGIN_TIMEOUT_MS || "", 10) || 15 * 60 * 1000; // extended to 15m (override via WA_LOGIN_TIMEOUT_MS)
+const AUTH_RETRY_INTERVAL_MS = 30 * 1000; // 30s between auth checks
+const AUTH_MAX_WAIT_MS = 30 * 60 * 1000; // 30m max wait
 
 const app = express();
 const PORT = 3000;
@@ -27,18 +34,174 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-function loadConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
-  } catch (err) {
-    console.error("Error loading config:", err.message);
-    return [];
+// BrowserSessionManager skeleton (not yet wired into broadcastMessage)
+class BrowserSessionManager {
+  constructor() {
+    this.initialized = false;
+    this.context = null; // persistent context or transient fallback
+    this.browser = null; // for non-persistent
+    this.queueTail = Promise.resolve();
+    this.inflightLoginCheck = null;
+    this.loginPage = null; // reused page for QR scan to avoid flicker
+  }
+  async init() {
+    if (this.initialized) return;
+    if (PERSISTENT) {
+      if (!fs.existsSync(USER_DATA_DIR)) {
+        fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+      }
+      this.context = await chromium.launchPersistentContext(USER_DATA_DIR, {
+        headless: false,
+        slowMo: 50,
+      });
+    } else {
+      this.browser = await chromium.launch({ headless: false, slowMo: 50 });
+      this.context = await this.browser.newContext({
+        storageState: fs.existsSync(SESSION_FILE) ? SESSION_FILE : undefined,
+      });
+    }
+    this.initialized = true;
+    console.log(
+      `[BrowserSessionManager] Initialized (persistent=${PERSISTENT})`
+    );
+  }
+  enqueue(fn) {
+    // Serialize tasks
+    this.queueTail = this.queueTail
+      .then(() => fn())
+      .catch((e) => {
+        console.error("[BrowserSessionManager] Task error:", e.message);
+      });
+    return this.queueTail;
+  }
+  async withPage(taskFn) {
+    await this.init();
+    return this.enqueue(async () => {
+      // Create isolated page per task
+      const page = await this.context.newPage();
+      try {
+        return await taskFn(page);
+      } finally {
+        try {
+          await page.close();
+        } catch (_) {}
+      }
+    });
+  }
+  async ensureLoggedIn() {
+    await this.init();
+    if (this.inflightLoginCheck) return this.inflightLoginCheck;
+    this.inflightLoginCheck = this.enqueue(async () => {
+      const searchBoxSelector = 'div[contenteditable="true"][data-tab="3"]';
+      const qrSelector = 'canvas[aria-label*="Scan this QR code"]';
+      const start = Date.now();
+      const deadline = start + LOGIN_TIMEOUT_MS;
+      let lastStatusLog = 0;
+
+      // Create or reuse a single persistent login page (prevents flicker)
+      if (!this.loginPage || this.loginPage.isClosed()) {
+        this.loginPage = await this.context.newPage();
+        await this.loginPage.goto("https://web.whatsapp.com/");
+      }
+      const page = this.loginPage;
+
+      while (Date.now() < deadline) {
+        // Check logged in
+        const searchBox = await page.$(searchBoxSelector);
+        if (searchBox) {
+          if (!PERSISTENT) {
+            try {
+              await this.context.storageState({ path: SESSION_FILE });
+            } catch (_) {}
+          }
+          if (Date.now() - lastStatusLog > 2000) {
+            console.log(
+              "[BrowserSessionManager] Logged in (search box detected)."
+            );
+            lastStatusLog = Date.now();
+          }
+          return true;
+        }
+        // Check QR presence
+        const qrVisible = await page.$(qrSelector);
+        if (qrVisible && Date.now() - lastStatusLog > 10000) {
+          const minsLeft = Math.ceil((deadline - Date.now()) / 60000);
+          console.log(
+            `[BrowserSessionManager] Waiting for QR scan... (~${minsLeft}m left)`
+          );
+          lastStatusLog = Date.now();
+        }
+        // Small wait; keep page open so user can scan
+        await page.waitForTimeout(3000);
+      }
+      const err = new Error(
+        `NOT_AUTHENTICATED: Timed out (${Math.round(
+          LOGIN_TIMEOUT_MS / 60000
+        )}m) waiting for WhatsApp login (QR scan).`
+      );
+      err.code = "NOT_AUTHENTICATED";
+      return Promise.reject(err);
+    });
+    try {
+      return await this.inflightLoginCheck;
+    } finally {
+      this.inflightLoginCheck = null;
+    }
+  }
+  async getStatus() {
+    try {
+      await this.init();
+      const searchBoxSelector = 'div[contenteditable="true"][data-tab="3"]';
+      const qrSelector = 'canvas[aria-label*="Scan this QR code"]';
+      // Reuse persistent loginPage to avoid flicker caused by opening/closing pages
+      if (!this.loginPage || this.loginPage.isClosed()) {
+        this.loginPage = await this.context.newPage();
+        await this.loginPage.goto("https://web.whatsapp.com/");
+      } else if (!this.loginPage.url().startsWith("https://web.whatsapp.com")) {
+        try {
+          await this.loginPage.goto("https://web.whatsapp.com/");
+        } catch (_) {}
+      }
+      const page = this.loginPage;
+      const searchBox = await page.$(searchBoxSelector);
+      if (searchBox) return { loggedIn: true, pendingQR: false };
+      const qr = await page.$(qrSelector);
+      if (qr) return { loggedIn: false, pendingQR: true };
+      return { loggedIn: false, pendingQR: false };
+    } catch (e) {
+      return { loggedIn: false, pendingQR: false, error: e.message };
+    }
+  }
+  async shutdown() {
+    try {
+      if (this.loginPage && !this.loginPage.isClosed()) {
+        try {
+          await this.loginPage.close();
+        } catch (_) {}
+      }
+      if (this.context && PERSISTENT) {
+        await this.context.close();
+      } else if (this.browser) {
+        await this.browser.close();
+      }
+    } catch (e) {
+      console.error("[BrowserSessionManager] Shutdown error:", e.message);
+    }
   }
 }
+const browserSessionManager = new BrowserSessionManager();
 
-function escapeDoubleQuotes(str = "") {
-  return str.replace(/"/g, '\\"');
-}
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\nShutting down...");
+  await browserSessionManager.shutdown();
+  process.exit(0);
+});
+process.on("SIGTERM", async () => {
+  console.log("\nShutting down...");
+  await browserSessionManager.shutdown();
+  process.exit(0);
+});
 
 // ========== Schedule Persistence Helpers ==========
 function generateId() {
@@ -58,6 +221,10 @@ function loadSchedules() {
     return [];
   }
 }
+// Helper to fetch a single schedule
+function getSchedule(id) {
+  return loadSchedules().find((s) => s.id === id) || null;
+}
 
 function saveSchedules(list) {
   try {
@@ -76,6 +243,35 @@ function updateSchedule(id, patch) {
   schedules[idx] = { ...schedules[idx], ...patch };
   saveSchedules(schedules);
   return schedules[idx];
+}
+
+// Added: loadConfig function required by broadcastMessage
+function loadConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) {
+      console.warn(
+        "[config] whatsapp_groups.json not found, returning empty list"
+      );
+      return [];
+    }
+    const raw = fs.readFileSync(CONFIG_FILE, "utf-8").trim();
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) {
+      throw new Error("Config root must be an array");
+    }
+    // Normalize entries
+    return data
+      .filter(Boolean)
+      .map((g) => ({
+        name: (g.name || "").trim(),
+        suffix: g.suffix ? String(g.suffix) : "",
+      }))
+      .filter((g) => g.name);
+  } catch (e) {
+    console.error("[config] Failed to load groups:", e.message);
+    return [];
+  }
 }
 
 // ========== Scheduler Manager ==========
@@ -129,12 +325,25 @@ async function executeSchedule(id) {
       console.log(`Schedule ${id} sent successfully.`);
     }
   } catch (e) {
-    updateSchedule(id, {
-      status: "failed",
-      completedAt: new Date().toISOString(),
-      error: e.message,
-    });
-    console.error(`Schedule ${id} error:`, e.message);
+    if (e.code === "NOT_AUTHENTICATED") {
+      const now = Date.now();
+      updateSchedule(id, {
+        status: "waitingAuth",
+        waitingAuthSince: new Date(now).toISOString(),
+        error: e.message,
+      });
+      console.warn(
+        `Schedule ${id} waiting for authentication; will retry when logged in.`
+      );
+      scheduleAuthRetry(id, now);
+    } else {
+      updateSchedule(id, {
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error: e.message,
+      });
+      console.error(`Schedule ${id} error:`, e.message);
+    }
   } finally {
     const ref = scheduleTimers.get(id);
     if (ref) {
@@ -144,19 +353,61 @@ async function executeSchedule(id) {
   }
 }
 
+function scheduleAuthRetry(id, startTs) {
+  setTimeout(async () => {
+    const s = getSchedule(id);
+    if (!s || s.status !== "waitingAuth") return; // status changed externally
+    if (Date.now() - startTs > AUTH_MAX_WAIT_MS) {
+      updateSchedule(id, {
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error: "Auth wait timeout exceeded",
+      });
+      console.error(`Schedule ${id} auth wait timeout.`);
+      return;
+    }
+    // Check login
+    try {
+      const ok = await browserSessionManager.ensureLoggedIn().catch((err) => {
+        if (err.code === "NOT_AUTHENTICATED") return false;
+        throw err;
+      });
+      if (ok) {
+        // Re-queue schedule quickly
+        updateSchedule(id, { status: "pending", resumedAfterAuth: true });
+        console.log(`Schedule ${id} re-queued after authentication.`);
+        scheduleTimeout({
+          id,
+          runAt: new Date(Date.now() + 5000).toISOString(),
+          status: "pending",
+        });
+        return;
+      }
+    } catch (err) {
+      console.error(`Auth retry check error for schedule ${id}:`, err.message);
+    }
+    scheduleAuthRetry(id, startTs); // try again
+  }, AUTH_RETRY_INTERVAL_MS);
+}
+
+// Bootstrap pending & waitingAuth schedules on startup
 function bootstrapSchedules() {
   const schedules = loadSchedules();
   const now = Date.now();
   schedules.forEach((s) => {
     if (s.status === "pending") {
-      const runAtMs = Date.parse(s.runAt);
-      if (isNaN(runAtMs)) return;
       scheduleTimeout(s);
       console.log(
-        `Scheduled message ${s.id} for ${s.runAt}${
-          runAtMs < now ? " (missed, will run soon)" : ""
+        `(bootstrap) queued pending schedule ${s.id} for ${s.runAt}${
+          Date.parse(s.runAt) < now ? " (missed, will run soon)" : ""
         }`
       );
+    } else if (s.status === "waitingAuth") {
+      const since = Date.parse(s.waitingAuthSince || s.runAt) || now;
+      console.log(
+        `(bootstrap) schedule ${s.id} waitingAuth; resuming auth polling.`
+      );
+      scheduleAuthRetry(s.id, since);
     }
   });
 }
@@ -167,34 +418,20 @@ async function broadcastMessage(message) {
   const groups = loadConfig();
   if (!groups.length) throw new Error("No groups found in config");
 
-  let browser;
+  // Ensure session/context ready (placeholder ensureLoggedIn; full logic Step 3)
+  await browserSessionManager.ensureLoggedIn();
+
   const sentGroups = [];
   const failedGroups = [];
-  try {
-    browser = await chromium.launch({ headless: false, slowMo: 50 });
-    const context = await browser.newContext({
-      storageState: fs.existsSync(SESSION_FILE) ? SESSION_FILE : undefined,
-    });
-    const page = await context.newPage();
-    await page.goto("https://web.whatsapp.com/");
 
-    const qrCodeSelector = 'canvas[aria-label*="Scan this QR code"]';
-    const searchBoxSelector = 'div[contenteditable="true"][data-tab="3"]';
-
-    const isQRCodePresent = await page
-      .waitForSelector(qrCodeSelector, { timeout: 5000 })
-      .catch(() => null);
-
-    if (isQRCodePresent) {
-      console.log("QR code detected. Please scan with your WhatsApp app.");
-      await page.waitForSelector(searchBoxSelector, { timeout: 60000 });
-      await context.storageState({ path: SESSION_FILE });
-      console.log("Session saved to", SESSION_FILE);
-    } else {
-      await page.waitForSelector(searchBoxSelector, { timeout: 50000 });
+  return browserSessionManager.withPage(async (page) => {
+    // Navigate if fresh page
+    if (!page.url() || page.url() === "about:blank") {
+      await page.goto("https://web.whatsapp.com/");
     }
-
-    await page.waitForTimeout(1500);
+    const searchBoxSelector = 'div[contenteditable="true"][data-tab="3"]';
+    await page.waitForSelector(searchBoxSelector, { timeout: 60000 });
+    await page.waitForTimeout(800);
 
     const searchShortcut =
       process.platform === "darwin" ? "Meta+K" : "Control+K";
@@ -218,12 +455,12 @@ async function broadcastMessage(message) {
         await page.keyboard.press("Backspace");
 
         await page.keyboard.type(group.name, { delay: 50 });
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(900);
 
         const firstResultSelector = 'div[role="grid"] div[tabindex="0"]';
         await page.waitForSelector(firstResultSelector, { timeout: 10000 });
         await page.click(firstResultSelector);
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(600);
 
         const editables = page.locator('div[contenteditable="true"]');
         const editableCount = await editables.count();
@@ -242,13 +479,15 @@ async function broadcastMessage(message) {
 
         await page.evaluate((text) => {
           const el = document.activeElement;
-          el.innerHTML = "";
-          el.focus();
-          document.execCommand("insertText", false, text);
+          if (el) {
+            el.innerHTML = "";
+            el.focus();
+            document.execCommand("insertText", false, text);
+          }
         }, fullMessage);
 
         await page.keyboard.press("Enter");
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(500);
         console.log(`✅ Message sent to group: ${group.name}`);
         sentGroups.push(group.name);
       } catch (err) {
@@ -256,10 +495,18 @@ async function broadcastMessage(message) {
         failedGroups.push({ group: group.name, error: err.message });
       }
     }
-  } finally {
-    if (browser) await browser.close();
-  }
-  return { sentGroups, failedGroups };
+
+    // Persist storageState for non-persistent fallback mode
+    if (!PERSISTENT) {
+      try {
+        await browserSessionManager.context.storageState({
+          path: SESSION_FILE,
+        });
+      } catch (_) {}
+    }
+
+    return { sentGroups, failedGroups };
+  });
 }
 
 // Existing endpoint now uses broadcastMessage
@@ -292,11 +539,9 @@ app.post("/schedule", (req, res) => {
   const now = Date.now();
   const diff = runAtMs - now;
   if (diff < MIN_DELAY_MS) {
-    return res
-      .status(400)
-      .json({
-        error: `runAt must be at least ${MIN_DELAY_MS / 1000}s in future`,
-      });
+    return res.status(400).json({
+      error: `runAt must be at least ${MIN_DELAY_MS / 1000}s in future`,
+    });
   }
   if (diff > MAX_FUTURE_MS) {
     return res.status(400).json({ error: "runAt too far in future" });
@@ -353,7 +598,29 @@ app.delete("/schedule/:id", (req, res) => {
   res.json(schedules[idx]);
 });
 
+// New session status endpoint (Step 5)
+app.get("/session/status", async (req, res) => {
+  const status = await browserSessionManager.getStatus();
+  res.json(status);
+});
+
 app.listen(PORT, () => {
   bootstrapSchedules();
   console.log(`Server running on http://localhost:${PORT}`);
+  // Warm-up: launch Chromium & open WhatsApp Web immediately after server is up
+  (async () => {
+    try {
+      await browserSessionManager.init();
+      // Kick off ensureLoggedIn in background so QR (if needed) shows right away
+      browserSessionManager.ensureLoggedIn().catch((e) => {
+        if (e.code === "NOT_AUTHENTICATED") {
+          console.log("[startup] Waiting for QR scan (initial).");
+        } else {
+          console.error("[startup] Initial login check error:", e.message);
+        }
+      });
+    } catch (e) {
+      console.error("[startup] Browser warm-up failed:", e.message);
+    }
+  })();
 });

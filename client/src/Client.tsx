@@ -8,6 +8,12 @@ interface ScheduleItem {
   error?: string | null;
 }
 
+interface SessionStatus {
+  loggedIn: boolean;
+  pendingQR: boolean;
+  error?: string;
+}
+
 function Client() {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -18,6 +24,10 @@ function Client() {
   const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
+
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(
+    null
+  );
 
   const apiBase = "http://localhost:3000";
 
@@ -55,9 +65,23 @@ function Client() {
     }
   };
 
+  const fetchSessionStatus = async () => {
+    try {
+      const res = await fetch(`${apiBase}/session/status`);
+      const data = await res.json();
+      setSessionStatus(data);
+    } catch {
+      setSessionStatus(null);
+    }
+  };
+
   useEffect(() => {
     fetchSchedules();
-    const int = setInterval(fetchSchedules, 15000);
+    fetchSessionStatus();
+    const int = setInterval(() => {
+      fetchSchedules();
+      fetchSessionStatus();
+    }, 15000);
     return () => clearInterval(int);
   }, []);
 
@@ -122,6 +146,22 @@ function Client() {
     <div
       style={{ maxWidth: 800, margin: "2rem auto", fontFamily: "sans-serif" }}
     >
+      {sessionStatus && !sessionStatus.loggedIn && (
+        <div
+          style={{
+            background: sessionStatus.pendingQR ? "#fff3cd" : "#f8d7da",
+            color: "#333",
+            padding: "8px 12px",
+            borderRadius: 6,
+            marginBottom: 16,
+            border: "1px solid #eed",
+          }}
+        >
+          {sessionStatus.pendingQR
+            ? "Please open the WhatsApp window and scan the QR code once to enable scheduled sends."
+            : "Not logged in yet. Waiting for WhatsApp Web session..."}
+        </div>
+      )}
       <h2>WhatsApp Broadcast</h2>
       <section
         style={{
