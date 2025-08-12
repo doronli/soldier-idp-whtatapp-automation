@@ -438,8 +438,13 @@ async function broadcastMessage(message) {
 
     for (const group of groups) {
       try {
-        const suffix = group.suffix ? ` ${group.suffix}` : "";
-        const fullMessage = `${message}${suffix}`.trim();
+        // Build full message with suffix on a new line (if suffix provided)
+        let fullMessage = message.replace(/\r\n/g, "\n");
+        if (group.suffix) {
+          // Ensure exactly one newline before suffix
+          fullMessage = fullMessage.replace(/\n*$/, "");
+          fullMessage += "\n" + group.suffix;
+        }
 
         await page.keyboard.press(searchShortcut);
         await page.waitForSelector(searchBoxSelector, { timeout: 5000 });
@@ -477,16 +482,22 @@ async function broadcastMessage(message) {
         );
         await page.keyboard.press("Backspace");
 
-        await page.evaluate((text) => {
-          const el = document.activeElement;
-          if (el) {
-            el.innerHTML = "";
-            el.focus();
-            document.execCommand("insertText", false, text);
+        // Multiline support: type line by line, Shift+Enter preserves newline without sending
+        const normalized = fullMessage.replace(/\r\n/g, "\n");
+        const lines = normalized.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (line.length) {
+            await page.keyboard.type(line, { delay: 25 });
           }
-        }, fullMessage);
-
-        await page.keyboard.press("Enter");
+          if (i < lines.length - 1) {
+            await page.keyboard.down("Shift");
+            await page.keyboard.press("Enter");
+            await page.keyboard.up("Shift");
+            await page.waitForTimeout(80);
+          }
+        }
+        await page.keyboard.press("Enter"); // send once at end
         await page.waitForTimeout(500);
         console.log(`✅ Message sent to group: ${group.name}`);
         sentGroups.push(group.name);
@@ -504,6 +515,12 @@ async function broadcastMessage(message) {
         });
       } catch (_) {}
     }
+
+    // Keep the window open for observation before closing (30s)
+    console.log(
+      "All groups processed. Holding window open for 30s before closing..."
+    );
+    await page.waitForTimeout(30000);
 
     return { sentGroups, failedGroups };
   });
