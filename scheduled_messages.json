@@ -1,0 +1,12 @@
+[
+  {
+    "id": "ME927GWFKY32GZSL",
+    "message": "hey, please send this in 2 min",
+    "createdAt": "2025-08-12T21:34:26.127Z",
+    "runAt": "2025-08-12T21:36:00.000Z",
+    "status": "failed",
+    "error": "page.waitForSelector: Target page, context or browser has been closed",
+    "startedAt": "2025-08-12T21:36:00.001Z",
+    "completedAt": "2025-08-12T21:36:06.381Z"
+  }
+]

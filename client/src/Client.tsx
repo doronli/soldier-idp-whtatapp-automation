@@ -1,15 +1,31 @@
-import React, { useState } from "react";
+import { useState, useEffect } from "react";
+
+interface ScheduleItem {
+  id: string;
+  runAt: string;
+  status: string;
+  message?: string;
+  error?: string | null;
+}
 
 function Client() {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Scheduling state
+  const [scheduleTime, setScheduleTime] = useState(""); // local datetime-local value
+  const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [loadingSchedules, setLoadingSchedules] = useState(false);
+
+  const apiBase = "http://localhost:3000";
+
   const handleSend = async () => {
     setLoading(true);
     setStatus(null);
     try {
-      const res = await fetch("http://localhost:3000/send", {
+      const res = await fetch(`${apiBase}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -20,27 +36,189 @@ function Client() {
       } else {
         setStatus("❌ " + (data.error || "Unknown error"));
       }
-    } catch (err) {
+    } catch {
       setStatus("❌ Network error");
     }
     setLoading(false);
   };
 
+  const fetchSchedules = async () => {
+    try {
+      setLoadingSchedules(true);
+      const res = await fetch(`${apiBase}/schedules`);
+      const data = await res.json();
+      if (Array.isArray(data)) setSchedules(data as ScheduleItem[]);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingSchedules(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSchedules();
+    const int = setInterval(fetchSchedules, 15000);
+    return () => clearInterval(int);
+  }, []);
+
+  const handleSchedule = async () => {
+    setScheduleStatus(null);
+    if (!scheduleTime) {
+      setScheduleStatus("❌ Choose a time");
+      return;
+    }
+    try {
+      const local = new Date(scheduleTime);
+      const iso = local.toISOString();
+      const res = await fetch(`${apiBase}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, runAt: iso }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setScheduleStatus(
+          `✅ Scheduled id ${data.id} for ${new Date(
+            data.runAt
+          ).toLocaleString()}`
+        );
+        setMessage("");
+        setScheduleTime("");
+        fetchSchedules();
+      } else {
+        setScheduleStatus("❌ " + (data.error || "Failed to schedule"));
+      }
+    } catch {
+      setScheduleStatus("❌ Network error");
+    }
+  };
+
+  const cancelSchedule = async (id: string) => {
+    try {
+      const res = await fetch(`${apiBase}/schedule/${id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        fetchSchedules();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const canSchedule = () => {
+    if (!message.trim() || !scheduleTime) return false;
+    try {
+      const dt = new Date(scheduleTime);
+      if (isNaN(dt.getTime())) return false;
+      if (dt.getTime() - Date.now() < 30000) return false; // <30s
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <div
-      style={{ maxWidth: 500, margin: "5rem auto", fontFamily: "sans-serif" }}
+      style={{ maxWidth: 800, margin: "2rem auto", fontFamily: "sans-serif" }}
     >
-      <h2>Send WhatsApp Message to All Groups</h2>
-      <textarea
-        style={{ width: "100%", minHeight: 80, marginBottom: 12 }}
-        placeholder="Enter your message..."
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-      />
-      <button onClick={handleSend} disabled={loading || !message.trim()}>
-        {loading ? "Sending..." : "Send to All Groups"}
-      </button>
-      {status && <div style={{ marginTop: 16 }}>{status}</div>}
+      <h2>WhatsApp Broadcast</h2>
+      <section
+        style={{
+          border: "1px solid #ccc",
+          padding: 16,
+          borderRadius: 8,
+          marginBottom: 24,
+        }}
+      >
+        <h3>Immediate Send</h3>
+        <textarea
+          style={{ width: "100%", minHeight: 80, marginBottom: 12 }}
+          placeholder="Enter your message..."
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+        />
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button onClick={handleSend} disabled={loading || !message.trim()}>
+            {loading ? "Sending..." : "Send Now"}
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <label style={{ fontSize: 14 }}>Schedule time:</label>
+            <input
+              type="datetime-local"
+              value={scheduleTime}
+              onChange={(e) => setScheduleTime(e.target.value)}
+            />
+            <button onClick={handleSchedule} disabled={!canSchedule()}>
+              Schedule
+            </button>
+          </div>
+        </div>
+        {status && <div style={{ marginTop: 12 }}>{status}</div>}
+        {scheduleStatus && <div style={{ marginTop: 8 }}>{scheduleStatus}</div>}
+      </section>
+
+      <section
+        style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}
+      >
+        <h3>Scheduled Messages</h3>
+        <button
+          onClick={fetchSchedules}
+          disabled={loadingSchedules}
+          style={{ marginBottom: 12 }}
+        >
+          {loadingSchedules ? "Refreshing..." : "Refresh"}
+        </button>
+        {schedules.length === 0 && <div>No schedules.</div>}
+        {schedules.length > 0 && (
+          <table
+            style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
+          >
+            <thead>
+              <tr>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  ID
+                </th>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  Run At
+                </th>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  Status
+                </th>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.map((s) => (
+                <tr key={s.id} style={{ borderBottom: "1px solid #eee" }}>
+                  <td style={{ padding: "4px 6px" }}>{s.id}</td>
+                  <td style={{ padding: "4px 6px" }}>
+                    {new Date(s.runAt).toLocaleString()}
+                  </td>
+                  <td style={{ padding: "4px 6px" }}>{s.status}</td>
+                  <td style={{ padding: "4px 6px" }}>
+                    {s.status === "pending" && (
+                      <button onClick={() => cancelSchedule(s.id)}>
+                        Cancel
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
   );
 }
