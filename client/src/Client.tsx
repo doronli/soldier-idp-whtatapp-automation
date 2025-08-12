@@ -1,11 +1,18 @@
 import { useState, useEffect } from "react";
 
+interface FailedGroupEntry {
+  group: string;
+  error?: string;
+}
+
 interface ScheduleItem {
   id: string;
   runAt: string;
   status: string;
   message?: string;
   error?: string | null;
+  sentGroups?: string[];
+  failedGroups?: FailedGroupEntry[]; // added failed group details
 }
 
 interface SessionStatus {
@@ -42,7 +49,17 @@ function Client() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStatus("✅ " + data.status);
+        let msg = "✅ " + data.status;
+        const failedGroups: FailedGroupEntry[] = Array.isArray(
+          data.failedGroups
+        )
+          ? data.failedGroups
+          : [];
+        if (failedGroups.length) {
+          const names = failedGroups.map((g) => g.group).join(", ");
+          msg += ` | Failed groups: ${names}`;
+        }
+        setStatus(msg);
       } else {
         setStatus("❌ " + (data.error || "Unknown error"));
       }
@@ -234,27 +251,54 @@ function Client() {
                 <th
                   style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
                 >
+                  Details
+                </th>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
                   Actions
                 </th>
               </tr>
             </thead>
             <tbody>
-              {schedules.map((s) => (
-                <tr key={s.id} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: "4px 6px" }}>{s.id}</td>
-                  <td style={{ padding: "4px 6px" }}>
-                    {new Date(s.runAt).toLocaleString()}
-                  </td>
-                  <td style={{ padding: "4px 6px" }}>{s.status}</td>
-                  <td style={{ padding: "4px 6px" }}>
-                    {s.status === "pending" && (
-                      <button onClick={() => cancelSchedule(s.id)}>
-                        Cancel
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {schedules.map((s) => {
+                const failedList = Array.isArray(s.failedGroups)
+                  ? s.failedGroups
+                  : [];
+                return (
+                  <tr key={s.id} style={{ borderBottom: "1px solid #eee" }}>
+                    <td style={{ padding: "4px 6px" }}>{s.id}</td>
+                    <td style={{ padding: "4px 6px" }}>
+                      {new Date(s.runAt).toLocaleString()}
+                    </td>
+                    <td style={{ padding: "4px 6px" }}>{s.status}</td>
+                    <td style={{ padding: "4px 6px", maxWidth: 220 }}>
+                      {failedList.length > 0 && (
+                        <span style={{ color: "#b00020" }}>
+                          Failed: {failedList.map((f) => f.group).join(", ")}
+                        </span>
+                      )}
+                      {s.status === "sent" &&
+                        failedList.length === 0 &&
+                        s.sentGroups && (
+                          <span style={{ color: "#2e7d32" }}>
+                            Sent to {s.sentGroups.length} group(s)
+                          </span>
+                        )}
+                      {s.status === "failed" &&
+                        failedList.length === 0 &&
+                        s.error && <span title={s.error}>Error</span>}
+                    </td>
+                    <td style={{ padding: "4px 6px" }}>
+                      {s.status === "pending" && (
+                        <button onClick={() => cancelSchedule(s.id)}>
+                          Cancel
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
