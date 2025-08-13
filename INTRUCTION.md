@@ -10,13 +10,9 @@ If anything is unclear, follow the steps exactly and don’t close the Terminal 
 
 - An internet connection
 - About 1 GB of free disk space (for the browser download)
-- Git (to download the project)
-- Node.js LTS v18 or newer
+- install Git https://git-scm.com/downloads
+- Node.js LTS v22.14 or newer
   - Download: https://nodejs.org (choose LTS) and install
-
-Optional but helpful:
-
-- A GitHub account if the repository is private
 
 ---
 
