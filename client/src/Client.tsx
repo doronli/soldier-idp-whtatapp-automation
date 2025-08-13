@@ -12,7 +12,7 @@ interface ScheduleItem {
   message?: string;
   error?: string | null;
   sentGroups?: string[];
-  failedGroups?: FailedGroupEntry[]; // added failed group details
+  failedGroups?: FailedGroupEntry[];
 }
 
 interface SessionStatus {
@@ -32,7 +32,7 @@ function Client() {
   const [loading, setLoading] = useState(false);
 
   // Scheduling state
-  const [scheduleTime, setScheduleTime] = useState(""); // local datetime-local value
+  const [scheduleTime, setScheduleTime] = useState("");
   const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
@@ -69,14 +69,14 @@ function Client() {
           : [];
         if (failedGroups.length) {
           const names = failedGroups.map((g) => g.group).join(", ");
-          msg += ` | Failed groups: ${names}`;
+          msg += ` | קבוצות שנכשלו: ${names}`;
         }
         setStatus(msg);
       } else {
-        setStatus("❌ " + (data.error || "Unknown error"));
+        setStatus("❌ " + (data.error || "שגיאה לא ידועה"));
       }
     } catch {
-      setStatus("❌ Network error");
+      setStatus("❌ שגיאת רשת");
     }
     setLoading(false);
   };
@@ -129,7 +129,7 @@ function Client() {
   const handleSchedule = async () => {
     setScheduleStatus(null);
     if (!scheduleTime) {
-      setScheduleStatus("❌ Choose a time");
+      setScheduleStatus("❌ בחר זמן");
       return;
     }
     try {
@@ -143,18 +143,18 @@ function Client() {
       const data = await res.json();
       if (res.ok) {
         setScheduleStatus(
-          `✅ Scheduled id ${data.id} for ${new Date(
-            data.runAt
-          ).toLocaleString()}`
+          `✅ תוזמן מזהה ${data.id} ל-${new Date(data.runAt).toLocaleString(
+            "he-IL"
+          )}`
         );
         setMessage("");
         setScheduleTime("");
         fetchSchedules();
       } else {
-        setScheduleStatus("❌ " + (data.error || "Failed to schedule"));
+        setScheduleStatus("❌ " + (data.error || "נכשל בתזמון"));
       }
     } catch {
-      setScheduleStatus("❌ Network error");
+      setScheduleStatus("❌ שגיאת רשת");
     }
   };
 
@@ -174,7 +174,7 @@ function Client() {
   const handleAddGroup = async () => {
     setGroupMsg(null);
     if (!groupName.trim()) {
-      setGroupMsg("❌ Name required");
+      setGroupMsg("❌ נדרש שם");
       return;
     }
     setGroupLoading(true);
@@ -186,21 +186,21 @@ function Client() {
       });
       const data = await res.json();
       if (res.ok) {
-        setGroupMsg(`✅ Added '${data.name}'`);
+        setGroupMsg(`✅ נוסף '${data.name}'`);
         setGroupName("");
         setGroupSuffix("");
         fetchGroups();
       } else {
-        setGroupMsg("❌ " + (data.error || "Failed"));
+        setGroupMsg("❌ " + (data.error || "נכשל"));
       }
     } catch {
-      setGroupMsg("❌ Network error");
+      setGroupMsg("❌ שגיאת רשת");
     }
     setGroupLoading(false);
   };
 
   const handleDeleteGroup = async (name: string) => {
-    if (!confirm(`Delete group '${name}'?`)) return;
+    if (!confirm(`למחוק את הקבוצה '${name}'?`)) return;
     setGroupMsg(null);
     try {
       const res = await fetch(`${apiBase}/groups/${encodeURIComponent(name)}`, {
@@ -208,13 +208,13 @@ function Client() {
       });
       const data = await res.json().catch(() => null);
       if (res.ok) {
-        setGroupMsg(`✅ Deleted '${name}'`);
+        setGroupMsg(`✅ נמחק '${name}'`);
         setGroups((g) => g.filter((gr) => gr.name !== name));
       } else {
-        setGroupMsg("❌ " + (data?.error || "Delete failed"));
+        setGroupMsg("❌ " + (data?.error || "המחיקה נכשלה"));
       }
     } catch {
-      setGroupMsg("❌ Network error");
+      setGroupMsg("❌ שגיאת רשת");
     }
   };
 
@@ -232,6 +232,7 @@ function Client() {
 
   return (
     <div
+      dir="rtl"
       style={{ maxWidth: 800, margin: "2rem auto", fontFamily: "sans-serif" }}
     >
       {sessionStatus && !sessionStatus.loggedIn && (
@@ -243,14 +244,15 @@ function Client() {
             borderRadius: 6,
             marginBottom: 16,
             border: "1px solid #eed",
+            textAlign: "right",
           }}
         >
           {sessionStatus.pendingQR
-            ? "Please open the WhatsApp window and scan the QR code once to enable scheduled sends."
-            : "Not logged in yet. Waiting for WhatsApp Web session..."}
+            ? "אנא פתח את חלון הוואטסאפ וסרוק את קוד ה-QR פעם אחת כדי לאפשר שליחות מתוזמנות."
+            : "לא מחובר עדיין. ממתין לסשן של וואטסאפ ווב..."}
         </div>
       )}
-      <h2>WhatsApp Broadcast</h2>
+      <h2>שידור וואטסאפ</h2>
       <section
         style={{
           border: "1px solid #ccc",
@@ -259,37 +261,43 @@ function Client() {
           marginBottom: 24,
         }}
       >
-        <h3>Immediate Send</h3>
+        <h3>שליחה מיידית</h3>
         <textarea
           style={{ width: "100%", minHeight: 80, marginBottom: 12 }}
-          placeholder="Enter your message..."
+          placeholder="הזן את ההודעה שלך..."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
         />
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button onClick={handleSend} disabled={loading || !message.trim()}>
-            {loading ? "Sending..." : "Send Now"}
+            {loading ? "שולח..." : "שלח עכשיו"}
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <label style={{ fontSize: 14 }}>Schedule time:</label>
+            <label style={{ fontSize: 14 }}>זמן תזמון:</label>
             <input
               type="datetime-local"
               value={scheduleTime}
               onChange={(e) => setScheduleTime(e.target.value)}
             />
             <button onClick={handleSchedule} disabled={!canSchedule()}>
-              Schedule
+              תזמן
             </button>
           </div>
         </div>
-        {status && <div style={{ marginTop: 12 }}>{status}</div>}
-        {scheduleStatus && <div style={{ marginTop: 8 }}>{scheduleStatus}</div>}
+        {status && (
+          <div style={{ marginTop: 12, textAlign: "right" }}>{status}</div>
+        )}
+        {scheduleStatus && (
+          <div style={{ marginTop: 8, textAlign: "right" }}>
+            {scheduleStatus}
+          </div>
+        )}
       </section>
 
       <section
         style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}
       >
-        <h3>Manage Groups</h3>
+        <h3>ניהול קבוצות</h3>
         <div
           style={{
             display: "flex",
@@ -300,31 +308,31 @@ function Client() {
         >
           <input
             type="text"
-            placeholder="Group name"
+            placeholder="שם הקבוצה"
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
-            style={{ padding: 6 }}
+            style={{ padding: 6, textAlign: "right" }}
           />
           <textarea
-            placeholder="Suffix (optional, appears on new line)"
+            placeholder="סיומת (אופציונלי, מופיע בשורה חדשה)"
             value={groupSuffix}
             onChange={(e) => setGroupSuffix(e.target.value)}
-            style={{ padding: 6, minHeight: 70 }}
+            style={{ padding: 6, minHeight: 70, textAlign: "right" }}
           />
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <button
               onClick={handleAddGroup}
               disabled={groupLoading || !groupName.trim()}
             >
-              Add Group
+              הוסף קבוצה
             </button>
             <button type="button" onClick={fetchGroups} disabled={groupLoading}>
-              Refresh
+              רענן
             </button>
           </div>
-          {groupMsg && <div>{groupMsg}</div>}
+          {groupMsg && <div style={{ textAlign: "right" }}>{groupMsg}</div>}
         </div>
-        {groups.length === 0 && <div>No groups defined.</div>}
+        {groups.length === 0 && <div>לא הוגדרו קבוצות.</div>}
         {groups.length > 0 && (
           <table
             style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
@@ -332,19 +340,19 @@ function Client() {
             <thead>
               <tr>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Name
+                  שם
                 </th>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Suffix
+                  סיומת
                 </th>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Actions
+                  פעולות
                 </th>
               </tr>
             </thead>
@@ -359,6 +367,7 @@ function Client() {
                       padding: "4px 6px",
                       whiteSpace: "pre-wrap",
                       maxWidth: 260,
+                      textAlign: "right",
                     }}
                   >
                     {g.suffix
@@ -369,7 +378,7 @@ function Client() {
                   </td>
                   <td style={{ padding: "4px 6px" }}>
                     <button onClick={() => handleDeleteGroup(g.name)}>
-                      Delete
+                      מחק
                     </button>
                   </td>
                 </tr>
@@ -382,15 +391,15 @@ function Client() {
       <section
         style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}
       >
-        <h3>Scheduled Messages</h3>
+        <h3>הודעות מתוזמנות</h3>
         <button
           onClick={fetchSchedules}
           disabled={loadingSchedules}
           style={{ marginBottom: 12 }}
         >
-          {loadingSchedules ? "Refreshing..." : "Refresh"}
+          {loadingSchedules ? "מרענן..." : "רענן"}
         </button>
-        {schedules.length === 0 && <div>No schedules.</div>}
+        {schedules.length === 0 && <div>אין תזמונים.</div>}
         {schedules.length > 0 && (
           <table
             style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
@@ -398,29 +407,29 @@ function Client() {
             <thead>
               <tr>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  ID
+                  מזהה
                 </th>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Run At
+                  זמן הפעלה
                 </th>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Status
+                  סטטוס
                 </th>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Details
+                  פרטים
                 </th>
                 <th
-                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
                 >
-                  Actions
+                  פעולות
                 </th>
               </tr>
             </thead>
@@ -433,30 +442,38 @@ function Client() {
                   <tr key={s.id} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={{ padding: "4px 6px" }}>{s.id}</td>
                     <td style={{ padding: "4px 6px" }}>
-                      {new Date(s.runAt).toLocaleString()}
+                      {new Date(s.runAt).toLocaleString("he-IL")}
                     </td>
-                    <td style={{ padding: "4px 6px" }}>{s.status}</td>
+                    <td style={{ padding: "4px 6px" }}>
+                      {s.status === "pending"
+                        ? "ממתין"
+                        : s.status === "sent"
+                        ? "נשלח"
+                        : s.status === "failed"
+                        ? "נכשל"
+                        : s.status}
+                    </td>
                     <td style={{ padding: "4px 6px", maxWidth: 220 }}>
                       {failedList.length > 0 && (
                         <span style={{ color: "#b00020" }}>
-                          Failed: {failedList.map((f) => f.group).join(", ")}
+                          נכשל: {failedList.map((f) => f.group).join(", ")}
                         </span>
                       )}
                       {s.status === "sent" &&
                         failedList.length === 0 &&
                         s.sentGroups && (
                           <span style={{ color: "#2e7d32" }}>
-                            Sent to {s.sentGroups.length} group(s)
+                            נשלח ל-{s.sentGroups.length} קבוצות
                           </span>
                         )}
                       {s.status === "failed" &&
                         failedList.length === 0 &&
-                        s.error && <span title={s.error}>Error</span>}
+                        s.error && <span title={s.error}>שגיאה</span>}
                     </td>
                     <td style={{ padding: "4px 6px" }}>
                       {s.status === "pending" && (
                         <button onClick={() => cancelSchedule(s.id)}>
-                          Cancel
+                          בטל
                         </button>
                       )}
                     </td>
