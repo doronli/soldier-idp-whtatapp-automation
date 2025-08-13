@@ -28,6 +28,7 @@ export default function GroupsTab({
   const [editSuffix, setEditSuffix] = useState("");
   const [saving, setSaving] = useState(false);
   const apiBase = "http://localhost:3000";
+  const [query, setQuery] = useState("");
 
   const handleAdd = async () => {
     if (!groupName.trim()) return;
@@ -71,6 +72,15 @@ export default function GroupsTab({
       setSaving(false);
     }
   };
+
+  const normalized = query.trim().toLowerCase();
+  const filteredGroups = normalized
+    ? groups.filter(
+        (g) =>
+          g.name.toLowerCase().includes(normalized) ||
+          (g.suffix ? g.suffix.toLowerCase().includes(normalized) : false)
+      )
+    : groups;
 
   return (
     <div className="grid">
@@ -121,89 +131,112 @@ export default function GroupsTab({
           <div className="empty-state">לא הוגדרו קבוצות.</div>
         )}
         {groups.length > 0 && (
-          <div className="table-wrap" style={{ marginTop: 10 }}>
-            <table className="table rtl">
-              <thead>
-                <tr>
-                  <th>שם</th>
-                  <th>סיומת</th>
-                  <th>פעולות</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map((g) => (
-                  <tr key={g.name}>
-                    <td style={{ fontWeight: 600 }}>
-                      {editing === g.name ? (
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          style={{ textAlign: "right" }}
-                        />
-                      ) : (
-                        g.name
-                      )}
-                    </td>
-                    <td style={{ whiteSpace: "pre-wrap", maxWidth: 420 }}>
-                      {editing === g.name ? (
-                        <textarea
-                          value={editSuffix}
-                          onChange={(e) => setEditSuffix(e.target.value)}
-                          style={{ textAlign: "right", minHeight: 90 }}
-                        />
-                      ) : g.suffix ? (
-                        g.suffix.length > 200 ? (
-                          g.suffix.slice(0, 200) + "…"
-                        ) : (
-                          g.suffix
-                        )
-                      ) : null}
-                    </td>
-                    <td>
-                      {editing === g.name ? (
-                        <div className="inline">
-                          <button
-                            className="button success"
-                            onClick={saveEdit}
-                            disabled={saving}
-                          >
-                            {saving ? <span className="loader" /> : "שמור"}
-                          </button>
-                          <button
-                            className="button outline"
-                            onClick={cancelEdit}
-                            disabled={saving}
-                          >
-                            בטל
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="inline">
-                          <button
-                            className="button outline"
-                            onClick={() => beginEdit(g)}
-                          >
-                            ערוך
-                          </button>
-                          <button
-                            className="button danger"
-                            style={{
-                              padding: ".45rem .8rem",
-                              fontSize: ".7rem",
-                            }}
-                            onClick={() => deleteGroup(g.name)}
-                          >
-                            מחק
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div
+              className="inline"
+              style={{
+                marginBottom: 10,
+                gap: ".6rem",
+                justifyContent: "space-between",
+              }}
+            >
+              <input
+                type="text"
+                placeholder="חיפוש קבוצה או סיומת..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={{ textAlign: "right", maxWidth: 360 }}
+              />
+              <span className="small-note">{filteredGroups.length} תוצאות</span>
+            </div>
+            {filteredGroups.length === 0 ? (
+              <div className="empty-state">אין תוצאות לחיפוש.</div>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: 10 }}>
+                <table className="table rtl">
+                  <thead>
+                    <tr>
+                      <th>שם</th>
+                      <th>סיומת</th>
+                      <th>פעולות</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredGroups.map((g) => (
+                      <tr key={g.name}>
+                        <td style={{ fontWeight: 600 }}>
+                          {editing === g.name ? (
+                            <input
+                              type="text"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              style={{ textAlign: "right" }}
+                            />
+                          ) : (
+                            g.name
+                          )}
+                        </td>
+                        <td style={{ whiteSpace: "pre-wrap", maxWidth: 420 }}>
+                          {editing === g.name ? (
+                            <textarea
+                              value={editSuffix}
+                              onChange={(e) => setEditSuffix(e.target.value)}
+                              style={{ textAlign: "right", minHeight: 90 }}
+                            />
+                          ) : g.suffix ? (
+                            g.suffix.length > 200 ? (
+                              g.suffix.slice(0, 200) + "…"
+                            ) : (
+                              g.suffix
+                            )
+                          ) : null}
+                        </td>
+                        <td>
+                          {editing === g.name ? (
+                            <div className="inline">
+                              <button
+                                className="button success"
+                                onClick={saveEdit}
+                                disabled={saving}
+                              >
+                                {saving ? <span className="loader" /> : "שמור"}
+                              </button>
+                              <button
+                                className="button outline"
+                                onClick={cancelEdit}
+                                disabled={saving}
+                              >
+                                בטל
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline">
+                              <button
+                                className="button outline"
+                                onClick={() => beginEdit(g)}
+                              >
+                                ערוך
+                              </button>
+                              <button
+                                className="button danger"
+                                style={{
+                                  padding: ".45rem .8rem",
+                                  fontSize: ".7rem",
+                                }}
+                                onClick={() => deleteGroup(g.name)}
+                              >
+                                מחק
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
