@@ -24,7 +24,7 @@ const scheduleTimers = new Map();
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "http://localhost:5173");
-  res.header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.header("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
@@ -323,6 +323,32 @@ function removeGroup(name) {
   groups.splice(idx, 1);
   writeGroups(groups);
   return true;
+}
+
+function updateGroup(oldName, patch) {
+  const groups = readGroups();
+  const idx = groups.findIndex(
+    (g) =>
+      g.name.toLowerCase() ===
+      String(oldName || "")
+        .toLowerCase()
+        .trim()
+  );
+  if (idx === -1) return null;
+  const current = groups[idx];
+  const nextName =
+    patch.name !== undefined ? normalizeName(patch.name) : current.name;
+  const nextSuffix =
+    patch.suffix !== undefined ? normalizeSuffix(patch.suffix) : current.suffix;
+  // Ensure uniqueness on rename
+  const conflict = groups.some(
+    (g, i) => i !== idx && g.name.toLowerCase() === nextName.toLowerCase()
+  );
+  if (conflict) throw new Error("Group with this name already exists");
+  const updated = { name: nextName, suffix: nextSuffix };
+  groups[idx] = updated;
+  writeGroups(groups);
+  return updated;
 }
 
 // Refactor loadConfig to delegate (Step 3)
@@ -695,6 +721,19 @@ app.post("/groups", (req, res) => {
   try {
     const created = addGroup({ name, suffix });
     res.status(201).json(created);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.put("/groups/:name", (req, res) => {
+  if (!GROUPS_MUTABLE)
+    return res.status(403).json({ error: "Group mutations disabled" });
+  const target = decodeURIComponent(req.params.name || "");
+  const { name, suffix } = req.body || {};
+  try {
+    const updated = updateGroup(target, { name, suffix });
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

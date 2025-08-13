@@ -22,4 +22,5 @@ export interface SessionStatus {
 export interface Group {
   name: string;
   suffix: string;
+  id?: string; // optional future-proof
 }

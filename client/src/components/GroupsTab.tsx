@@ -23,6 +23,11 @@ export default function GroupsTab({
 }: Props) {
   const [groupName, setGroupName] = useState("");
   const [groupSuffix, setGroupSuffix] = useState("");
+  const [editing, setEditing] = useState<string | null>(null); // original name key
+  const [editName, setEditName] = useState("");
+  const [editSuffix, setEditSuffix] = useState("");
+  const [saving, setSaving] = useState(false);
+  const apiBase = "http://localhost:3000";
 
   const handleAdd = async () => {
     if (!groupName.trim()) return;
@@ -34,9 +39,42 @@ export default function GroupsTab({
     }
   };
 
+  const beginEdit = (g: Group) => {
+    setEditing(g.name);
+    setEditName(g.name);
+    setEditSuffix(g.suffix || "");
+  };
+  const cancelEdit = () => {
+    setEditing(null);
+    setEditName("");
+    setEditSuffix("");
+  };
+  const saveEdit = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `${apiBase}/groups/${encodeURIComponent(editing)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: editName, suffix: editSuffix }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "עדכון נכשל");
+      cancelEdit();
+      refreshGroups();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="grid">
-      <div className="card">
+      <div className="card full-span">
         <div className="glow-ring" />
         <h3>יצירת קבוצה</h3>
         <input
@@ -76,7 +114,7 @@ export default function GroupsTab({
         )}
       </div>
 
-      <div className="card">
+      <div className="card full-span">
         <div className="glow-ring" />
         <h3>קבוצות קיימות</h3>
         {groups.length === 0 && (
@@ -95,22 +133,71 @@ export default function GroupsTab({
               <tbody>
                 {groups.map((g) => (
                   <tr key={g.name}>
-                    <td style={{ fontWeight: 600 }}>{g.name}</td>
-                    <td style={{ whiteSpace: "pre-wrap", maxWidth: 220 }}>
-                      {g.suffix
-                        ? g.suffix.length > 120
-                          ? g.suffix.slice(0, 120) + "…"
-                          : g.suffix
-                        : null}
+                    <td style={{ fontWeight: 600 }}>
+                      {editing === g.name ? (
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          style={{ textAlign: "right" }}
+                        />
+                      ) : (
+                        g.name
+                      )}
+                    </td>
+                    <td style={{ whiteSpace: "pre-wrap", maxWidth: 420 }}>
+                      {editing === g.name ? (
+                        <textarea
+                          value={editSuffix}
+                          onChange={(e) => setEditSuffix(e.target.value)}
+                          style={{ textAlign: "right", minHeight: 90 }}
+                        />
+                      ) : g.suffix ? (
+                        g.suffix.length > 200 ? (
+                          g.suffix.slice(0, 200) + "…"
+                        ) : (
+                          g.suffix
+                        )
+                      ) : null}
                     </td>
                     <td>
-                      <button
-                        className="button danger"
-                        style={{ padding: ".45rem .8rem", fontSize: ".7rem" }}
-                        onClick={() => deleteGroup(g.name)}
-                      >
-                        מחק
-                      </button>
+                      {editing === g.name ? (
+                        <div className="inline">
+                          <button
+                            className="button success"
+                            onClick={saveEdit}
+                            disabled={saving}
+                          >
+                            {saving ? <span className="loader" /> : "שמור"}
+                          </button>
+                          <button
+                            className="button outline"
+                            onClick={cancelEdit}
+                            disabled={saving}
+                          >
+                            בטל
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="inline">
+                          <button
+                            className="button outline"
+                            onClick={() => beginEdit(g)}
+                          >
+                            ערוך
+                          </button>
+                          <button
+                            className="button danger"
+                            style={{
+                              padding: ".45rem .8rem",
+                              fontSize: ".7rem",
+                            }}
+                            onClick={() => deleteGroup(g.name)}
+                          >
+                            מחק
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
