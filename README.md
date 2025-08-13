@@ -8,7 +8,8 @@ This project automates sending messages to multiple WhatsApp groups using Node.j
 - Persistent WhatsApp Web session (first QR scan only) using a reusable browser profile (`.chromium-profile`).
 - Schedule a future one‑off broadcast (create, list, cancel) via API or UI.
 - Session status endpoint & UI banner indicating when a QR scan is required.
-- Simple React client UI for sending & scheduling.
+- Manage WhatsApp groups (list/add/delete) via API & UI (dynamic without restart).
+- Simple React client UI for sending, scheduling, and managing groups.
 
 ## Setup
 
@@ -85,6 +86,7 @@ or when waiting for scan:
 - Enter your message and click "Send Now" for immediate broadcast.
 - To schedule: pick a future date/time (must be ≥30s in future, ≤30 days) and click "Schedule".
 - View existing schedules in the "Scheduled Messages" table; cancel pending ones.
+- Manage groups in the "Groups" section: add new groups, delete existing ones, and view all groups.
 
 ### API Usage
 
@@ -136,6 +138,44 @@ curl -X DELETE http://localhost:3000/schedule/<SCHEDULE_ID>
 ```
 
 Returns the cancelled schedule (status becomes `cancelled`). Only `pending` schedules can be cancelled.
+
+#### Group Management (NEW)
+
+List groups:
+
+```sh
+curl http://localhost:3000/groups
+```
+
+Add group:
+
+```sh
+curl -X POST http://localhost:3000/groups \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My Group","suffix":"Thanks!"}'
+```
+
+Delete group (URL-encode name if needed):
+
+```sh
+curl -X DELETE "http://localhost:3000/groups/My%20Group"
+```
+
+Response examples:
+
+```json
+[{ "name": "My Group", "suffix": "Thanks!" }]
+```
+
+```json
+{ "name": "My Group", "suffix": "Thanks!" }
+```
+
+```json
+{ "deleted": true }
+```
+
+Validation errors return 400 with `{ "error": "..." }`.
 
 ## Troubleshooting
 

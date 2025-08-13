@@ -113,7 +113,9 @@ function Client() {
     <div dir="rtl" className="app-shell">
       <div className="top-bar">
         <div>
-          <h1 className="hero-title">מערכת שידור וואטסאפ</h1>
+          <h1 className="hero-title">
+            לזכר הגיבורים שלנו <span className="remove-bg-color">🇮🇱</span>
+          </h1>
           <p className="hero-sub">
             ניהול הודעות, תזמונים וקבוצות בצורה מהירה ומתקדמת
           </p>
