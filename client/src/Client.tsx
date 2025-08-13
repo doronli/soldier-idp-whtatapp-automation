@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface FailedGroupEntry {
   group: string;
@@ -49,6 +49,13 @@ function Client() {
   );
 
   const apiBase = "http://localhost:3000";
+  const messageRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const autoResize = (el: HTMLTextAreaElement) => {
+    el.style.height = "auto";
+    const max = 600; // px cap
+    el.style.height = Math.min(el.scrollHeight, max) + "px";
+  };
 
   const handleSend = async () => {
     setLoading(true);
@@ -125,6 +132,10 @@ function Client() {
     }, 60000);
     return () => clearInterval(int);
   }, []);
+
+  useEffect(() => {
+    if (messageRef.current) autoResize(messageRef.current);
+  }, [message]);
 
   const handleSchedule = async () => {
     setScheduleStatus(null);
@@ -231,259 +242,269 @@ function Client() {
   };
 
   return (
-    <div
-      dir="rtl"
-      style={{ maxWidth: 800, margin: "2rem auto", fontFamily: "sans-serif" }}
-    >
+    <div dir="rtl" className="app-shell">
+      <div className="top-bar">
+        <div>
+          <h1 className="hero-title">מערכת שידור וואטסאפ</h1>
+          <p className="hero-sub">
+            ניהול הודעות, תזמונים וקבוצות בצורה מהירה ומתקדמת
+          </p>
+        </div>
+        {sessionStatus && (
+          <div
+            className={
+              "badge " +
+              (sessionStatus.loggedIn
+                ? "online"
+                : sessionStatus.pendingQR
+                ? "pending"
+                : "offline")
+            }
+          >
+            {sessionStatus.loggedIn
+              ? "מחובר"
+              : sessionStatus.pendingQR
+              ? "דרוש סריקת QR"
+              : "לא מחובר"}
+          </div>
+        )}
+      </div>
+
       {sessionStatus && !sessionStatus.loggedIn && (
         <div
+          className="card"
           style={{
-            background: sessionStatus.pendingQR ? "#fff3cd" : "#f8d7da",
-            color: "#333",
-            padding: "8px 12px",
-            borderRadius: 6,
-            marginBottom: 16,
-            border: "1px solid #eed",
-            textAlign: "right",
+            borderColor: sessionStatus.pendingQR
+              ? "rgba(245,158,11,0.55)"
+              : "rgba(239,68,68,0.55)",
           }}
         >
+          <div className="glow-ring" />
           {sessionStatus.pendingQR
             ? "אנא פתח את חלון הוואטסאפ וסרוק את קוד ה-QR פעם אחת כדי לאפשר שליחות מתוזמנות."
             : "לא מחובר עדיין. ממתין לסשן של וואטסאפ ווב..."}
         </div>
       )}
-      <h2>שידור וואטסאפ</h2>
-      <section
-        style={{
-          border: "1px solid #ccc",
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 24,
-        }}
-      >
-        <h3>שליחה מיידית</h3>
-        <textarea
-          style={{ width: "100%", minHeight: 80, marginBottom: 12 }}
-          placeholder="הזן את ההודעה שלך..."
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-        />
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button onClick={handleSend} disabled={loading || !message.trim()}>
-            {loading ? "שולח..." : "שלח עכשיו"}
-          </button>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <label style={{ fontSize: 14 }}>זמן תזמון:</label>
-            <input
-              type="datetime-local"
-              value={scheduleTime}
-              onChange={(e) => setScheduleTime(e.target.value)}
-            />
-            <button onClick={handleSchedule} disabled={!canSchedule()}>
-              תזמן
-            </button>
-          </div>
-        </div>
-        {status && (
-          <div style={{ marginTop: 12, textAlign: "right" }}>{status}</div>
-        )}
-        {scheduleStatus && (
-          <div style={{ marginTop: 8, textAlign: "right" }}>
-            {scheduleStatus}
-          </div>
-        )}
-      </section>
 
-      <section
-        style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}
-      >
-        <h3>ניהול קבוצות</h3>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            marginBottom: 16,
-          }}
-        >
+      <div className="grid">
+        <div className="card full-span">
+          <div className="glow-ring" />
+          <h3>שליחה מיידית ותזמון</h3>
+          <textarea
+            ref={messageRef}
+            placeholder="הזן את ההודעה שלך..."
+            value={message}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              if (messageRef.current) autoResize(messageRef.current);
+            }}
+            style={{ minHeight: 168, overflow: "hidden" }}
+          />
+          <div className="actions-row" style={{ marginTop: "0.85rem" }}>
+            <button
+              className="button"
+              onClick={handleSend}
+              disabled={loading || !message.trim()}
+            >
+              {loading ? <span className="loader" /> : "שלח עכשיו"}
+            </button>
+            <div className="inline" style={{ flexGrow: 1 }}>
+              <label className="label" style={{ minWidth: 80 }}>
+                זמן תזמון
+              </label>
+              <input
+                type="datetime-local"
+                value={scheduleTime}
+                onChange={(e) => setScheduleTime(e.target.value)}
+              />
+              <button
+                className="button outline"
+                onClick={handleSchedule}
+                disabled={!canSchedule()}
+              >
+                תזמן
+              </button>
+            </div>
+          </div>
+          {status && (
+            <div className="status-line" style={{ marginTop: 12 }}>
+              {status}
+            </div>
+          )}
+          {scheduleStatus && (
+            <div className="status-line" style={{ marginTop: 12 }}>
+              {scheduleStatus}
+            </div>
+          )}
+          <p className="small-note">מרווח מינימלי של 30 שניות לזמן תזמון</p>
+        </div>
+
+        <div className="card">
+          <div className="glow-ring" />
+          <h3>ניהול קבוצות</h3>
           <input
             type="text"
             placeholder="שם הקבוצה"
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
-            style={{ padding: 6, textAlign: "right" }}
+            style={{ textAlign: "right" }}
           />
           <textarea
             placeholder="סיומת (אופציונלי, מופיע בשורה חדשה)"
             value={groupSuffix}
             onChange={(e) => setGroupSuffix(e.target.value)}
-            style={{ padding: 6, minHeight: 70, textAlign: "right" }}
+            style={{ textAlign: "right", minHeight: 90 }}
           />
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div className="actions-row" style={{ marginTop: 10 }}>
             <button
+              className="button success"
               onClick={handleAddGroup}
               disabled={groupLoading || !groupName.trim()}
             >
-              הוסף קבוצה
+              {groupLoading ? <span className="loader" /> : "הוסף קבוצה"}
             </button>
-            <button type="button" onClick={fetchGroups} disabled={groupLoading}>
+            <button
+              type="button"
+              className="button outline"
+              onClick={fetchGroups}
+              disabled={groupLoading}
+            >
               רענן
             </button>
           </div>
-          {groupMsg && <div style={{ textAlign: "right" }}>{groupMsg}</div>}
-        </div>
-        {groups.length === 0 && <div>לא הוגדרו קבוצות.</div>}
-        {groups.length > 0 && (
-          <table
-            style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
-          >
-            <thead>
-              <tr>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  שם
-                </th>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  סיומת
-                </th>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  פעולות
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((g) => (
-                <tr key={g.name} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: "4px 6px", fontWeight: 500 }}>
-                    {g.name}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 6px",
-                      whiteSpace: "pre-wrap",
-                      maxWidth: 260,
-                      textAlign: "right",
-                    }}
-                  >
-                    {g.suffix
-                      ? g.suffix.length > 120
-                        ? g.suffix.slice(0, 120) + "…"
-                        : g.suffix
-                      : null}
-                  </td>
-                  <td style={{ padding: "4px 6px" }}>
-                    <button onClick={() => handleDeleteGroup(g.name)}>
-                      מחק
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section
-        style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}
-      >
-        <h3>הודעות מתוזמנות</h3>
-        <button
-          onClick={fetchSchedules}
-          disabled={loadingSchedules}
-          style={{ marginBottom: 12 }}
-        >
-          {loadingSchedules ? "מרענן..." : "רענן"}
-        </button>
-        {schedules.length === 0 && <div>אין תזמונים.</div>}
-        {schedules.length > 0 && (
-          <table
-            style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
-          >
-            <thead>
-              <tr>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  מזהה
-                </th>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  זמן הפעלה
-                </th>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  סטטוס
-                </th>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  פרטים
-                </th>
-                <th
-                  style={{ textAlign: "right", borderBottom: "1px solid #ddd" }}
-                >
-                  פעולות
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {schedules.map((s) => {
-                const failedList = Array.isArray(s.failedGroups)
-                  ? s.failedGroups
-                  : [];
-                return (
-                  <tr key={s.id} style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "4px 6px" }}>{s.id}</td>
-                    <td style={{ padding: "4px 6px" }}>
-                      {new Date(s.runAt).toLocaleString("he-IL")}
-                    </td>
-                    <td style={{ padding: "4px 6px" }}>
-                      {s.status === "pending"
-                        ? "ממתין"
-                        : s.status === "sent"
-                        ? "נשלח"
-                        : s.status === "failed"
-                        ? "נכשל"
-                        : s.status}
-                    </td>
-                    <td style={{ padding: "4px 6px", maxWidth: 220 }}>
-                      {failedList.length > 0 && (
-                        <span style={{ color: "#b00020" }}>
-                          נכשל: {failedList.map((f) => f.group).join(", ")}
-                        </span>
-                      )}
-                      {s.status === "sent" &&
-                        failedList.length === 0 &&
-                        s.sentGroups && (
-                          <span style={{ color: "#2e7d32" }}>
-                            נשלח ל-{s.sentGroups.length} קבוצות
-                          </span>
-                        )}
-                      {s.status === "failed" &&
-                        failedList.length === 0 &&
-                        s.error && <span title={s.error}>שגיאה</span>}
-                    </td>
-                    <td style={{ padding: "4px 6px" }}>
-                      {s.status === "pending" && (
-                        <button onClick={() => cancelSchedule(s.id)}>
-                          בטל
-                        </button>
-                      )}
-                    </td>
+          {groupMsg && (
+            <div className="status-line" style={{ marginTop: 12 }}>
+              {groupMsg}
+            </div>
+          )}
+          <hr className="separator" />
+          {groups.length === 0 && (
+            <div className="empty-state">לא הוגדרו קבוצות.</div>
+          )}
+          {groups.length > 0 && (
+            <div className="table-wrap" style={{ marginTop: 10 }}>
+              <table className="table rtl">
+                <thead>
+                  <tr>
+                    <th>שם</th>
+                    <th>סיומת</th>
+                    <th>פעולות</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {groups.map((g) => (
+                    <tr key={g.name}>
+                      <td style={{ fontWeight: 600 }}>{g.name}</td>
+                      <td style={{ whiteSpace: "pre-wrap", maxWidth: 220 }}>
+                        {g.suffix
+                          ? g.suffix.length > 120
+                            ? g.suffix.slice(0, 120) + "…"
+                            : g.suffix
+                          : null}
+                      </td>
+                      <td>
+                        <button
+                          className="button danger"
+                          style={{ padding: ".45rem .8rem", fontSize: ".7rem" }}
+                          onClick={() => handleDeleteGroup(g.name)}
+                        >
+                          מחק
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="glow-ring" />
+          <h3>הודעות מתוזמנות</h3>
+          <button
+            className="button outline"
+            onClick={fetchSchedules}
+            disabled={loadingSchedules}
+            style={{ marginBottom: 12 }}
+          >
+            {loadingSchedules ? "מרענן..." : "רענן"}
+          </button>
+          {schedules.length === 0 && (
+            <div className="empty-state">אין תזמונים.</div>
+          )}
+          {schedules.length > 0 && (
+            <div className="table-wrap">
+              <table className="table rtl">
+                <thead>
+                  <tr>
+                    <th>מזהה</th>
+                    <th>זמן הפעלה</th>
+                    <th>סטטוס</th>
+                    <th>פרטים</th>
+                    <th>פעולות</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedules.map((s) => {
+                    const failedList = Array.isArray(s.failedGroups)
+                      ? s.failedGroups
+                      : [];
+                    return (
+                      <tr key={s.id}>
+                        <td>{s.id}</td>
+                        <td>{new Date(s.runAt).toLocaleString("he-IL")}</td>
+                        <td>
+                          {s.status === "pending" ? (
+                            <span className="tag">ממתין</span>
+                          ) : s.status === "sent" ? (
+                            <span className="tag ok">נשלח</span>
+                          ) : s.status === "failed" ? (
+                            <span className="tag fail">נכשל</span>
+                          ) : (
+                            s.status
+                          )}
+                        </td>
+                        <td style={{ maxWidth: 240 }}>
+                          {failedList.length > 0 && (
+                            <span className="tag fail">
+                              נכשל: {failedList.map((f) => f.group).join(", ")}
+                            </span>
+                          )}
+                          {s.status === "sent" &&
+                            failedList.length === 0 &&
+                            s.sentGroups && (
+                              <span className="tag ok">
+                                נשלח ל-{s.sentGroups.length} קבוצות
+                              </span>
+                            )}
+                          {s.status === "failed" &&
+                            failedList.length === 0 &&
+                            s.error && <span title={s.error}>שגיאה</span>}
+                        </td>
+                        <td>
+                          {s.status === "pending" && (
+                            <button
+                              className="button danger"
+                              style={{
+                                padding: ".45rem .8rem",
+                                fontSize: ".65rem",
+                              }}
+                              onClick={() => cancelSchedule(s.id)}
+                            >
+                              בטל
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
