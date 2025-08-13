@@ -245,33 +245,89 @@ function updateSchedule(id, patch) {
   return schedules[idx];
 }
 
-// Added: loadConfig function required by broadcastMessage
-function loadConfig() {
+// === Group Management Helpers (Step 1) ===
+function normalizeSuffix(raw) {
+  if (raw == null) return "";
+  let s = String(raw).replace(/\r\n/g, "\n");
+  if (s.length > 2000) throw new Error("suffix too long (max 2000 chars)");
+  s = s
+    .split("\n")
+    .map((l) => l.replace(/\s+$/g, ""))
+    .join("\n")
+    .replace(/\n+$/g, "");
+  return s;
+}
+function normalizeName(raw) {
+  if (typeof raw !== "string") throw new Error("name required");
+  const name = raw.trim();
+  if (!name) throw new Error("name required");
+  if (name.length > 120) throw new Error("name too long");
+  if (/\n|\r/.test(name)) throw new Error("name cannot contain line breaks");
+  return name;
+}
+function readGroups() {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
-      console.warn(
-        "[config] whatsapp_groups.json not found, returning empty list"
-      );
-      return [];
-    }
+    if (!fs.existsSync(CONFIG_FILE)) return [];
     const raw = fs.readFileSync(CONFIG_FILE, "utf-8").trim();
     if (!raw) return [];
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data)) {
-      throw new Error("Config root must be an array");
-    }
-    // Normalize entries
-    return data
-      .filter(Boolean)
-      .map((g) => ({
-        name: (g.name || "").trim(),
-        suffix: g.suffix ? String(g.suffix) : "",
-      }))
-      .filter((g) => g.name);
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((g) => {
+        try {
+          return {
+            name: normalizeName(g.name || ""),
+            suffix: normalizeSuffix(g.suffix || ""),
+          };
+        } catch (_) {
+          return null; // skip invalid
+        }
+      })
+      .filter(Boolean);
   } catch (e) {
-    console.error("[config] Failed to load groups:", e.message);
+    console.error("[groups] read error:", e.message);
     return [];
   }
+}
+function writeGroups(list) {
+  try {
+    const tmp = CONFIG_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+    fs.renameSync(tmp, CONFIG_FILE);
+  } catch (e) {
+    console.error("[groups] write error:", e.message);
+    throw e;
+  }
+}
+function addGroup({ name, suffix }) {
+  const groups = readGroups();
+  const normName = normalizeName(name);
+  if (groups.some((g) => g.name.toLowerCase() === normName.toLowerCase())) {
+    throw new Error("Group already exists");
+  }
+  const entry = { name: normName, suffix: normalizeSuffix(suffix || "") };
+  groups.push(entry);
+  writeGroups(groups);
+  return entry;
+}
+function removeGroup(name) {
+  const groups = readGroups();
+  const idx = groups.findIndex(
+    (g) =>
+      g.name.toLowerCase() ===
+      String(name || "")
+        .toLowerCase()
+        .trim()
+  );
+  if (idx === -1) return false;
+  groups.splice(idx, 1);
+  writeGroups(groups);
+  return true;
+}
+
+// Refactor loadConfig to delegate (Step 3)
+function loadConfig() {
+  return readGroups();
 }
 
 // ========== Scheduler Manager ==========
@@ -436,6 +492,7 @@ async function broadcastMessage(message) {
     const searchShortcut =
       process.platform === "darwin" ? "Meta+K" : "Control+K";
 
+    let groupIndex = 0; // added for inter-group delay
     for (const group of groups) {
       try {
         // Build full message with suffix on a new line (if suffix provided)
@@ -504,6 +561,11 @@ async function broadcastMessage(message) {
       } catch (err) {
         console.error(`❌ Failed to send to ${group.name}:`, err.message);
         failedGroups.push({ group: group.name, error: err.message });
+      }
+      groupIndex++;
+      if (groupIndex < groups.length) {
+        console.log("Waiting 3s before next group...");
+        await page.waitForTimeout(3000); // 3 second delay between groups
       }
     }
 
@@ -619,6 +681,31 @@ app.delete("/schedule/:id", (req, res) => {
 app.get("/session/status", async (req, res) => {
   const status = await browserSessionManager.getStatus();
   res.json(status);
+});
+
+// Insert Group Management Endpoints (Step 2)
+app.get("/groups", (req, res) => {
+  res.json(readGroups());
+});
+const GROUPS_MUTABLE = true;
+app.post("/groups", (req, res) => {
+  if (!GROUPS_MUTABLE)
+    return res.status(403).json({ error: "Group mutations disabled" });
+  const { name, suffix } = req.body || {};
+  try {
+    const created = addGroup({ name, suffix });
+    res.status(201).json(created);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.delete("/groups/:name", (req, res) => {
+  if (!GROUPS_MUTABLE)
+    return res.status(403).json({ error: "Group mutations disabled" });
+  const target = decodeURIComponent(req.params.name || "");
+  const ok = removeGroup(target);
+  if (!ok) return res.status(404).json({ error: "Not found" });
+  res.json({ deleted: true });
 });
 
 app.listen(PORT, () => {

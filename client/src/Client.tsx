@@ -21,6 +21,11 @@ interface SessionStatus {
   error?: string;
 }
 
+interface Group {
+  name: string;
+  suffix: string;
+}
+
 function Client() {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -31,6 +36,13 @@ function Client() {
   const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
+
+  // Groups management state
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const [groupSuffix, setGroupSuffix] = useState("");
+  const [groupMsg, setGroupMsg] = useState<string | null>(null);
+  const [groupLoading, setGroupLoading] = useState(false);
 
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(
     null
@@ -82,6 +94,16 @@ function Client() {
     }
   };
 
+  const fetchGroups = async () => {
+    try {
+      const res = await fetch(`${apiBase}/groups`);
+      const data = await res.json();
+      if (Array.isArray(data)) setGroups(data);
+    } catch {
+      // ignore
+    }
+  };
+
   const fetchSessionStatus = async () => {
     try {
       const res = await fetch(`${apiBase}/session/status`);
@@ -95,10 +117,12 @@ function Client() {
   useEffect(() => {
     fetchSchedules();
     fetchSessionStatus();
+    fetchGroups();
     const int = setInterval(() => {
       fetchSchedules();
       fetchSessionStatus();
-    }, 15000);
+      fetchGroups();
+    }, 60000);
     return () => clearInterval(int);
   }, []);
 
@@ -144,6 +168,53 @@ function Client() {
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handleAddGroup = async () => {
+    setGroupMsg(null);
+    if (!groupName.trim()) {
+      setGroupMsg("❌ Name required");
+      return;
+    }
+    setGroupLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: groupName, suffix: groupSuffix }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setGroupMsg(`✅ Added '${data.name}'`);
+        setGroupName("");
+        setGroupSuffix("");
+        fetchGroups();
+      } else {
+        setGroupMsg("❌ " + (data.error || "Failed"));
+      }
+    } catch {
+      setGroupMsg("❌ Network error");
+    }
+    setGroupLoading(false);
+  };
+
+  const handleDeleteGroup = async (name: string) => {
+    if (!confirm(`Delete group '${name}'?`)) return;
+    setGroupMsg(null);
+    try {
+      const res = await fetch(`${apiBase}/groups/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        setGroupMsg(`✅ Deleted '${name}'`);
+        setGroups((g) => g.filter((gr) => gr.name !== name));
+      } else {
+        setGroupMsg("❌ " + (data?.error || "Delete failed"));
+      }
+    } catch {
+      setGroupMsg("❌ Network error");
     }
   };
 
@@ -213,6 +284,99 @@ function Client() {
         </div>
         {status && <div style={{ marginTop: 12 }}>{status}</div>}
         {scheduleStatus && <div style={{ marginTop: 8 }}>{scheduleStatus}</div>}
+      </section>
+
+      <section
+        style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}
+      >
+        <h3>Manage Groups</h3>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            marginBottom: 16,
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Group name"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            style={{ padding: 6 }}
+          />
+          <textarea
+            placeholder="Suffix (optional, appears on new line)"
+            value={groupSuffix}
+            onChange={(e) => setGroupSuffix(e.target.value)}
+            style={{ padding: 6, minHeight: 70 }}
+          />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <button
+              onClick={handleAddGroup}
+              disabled={groupLoading || !groupName.trim()}
+            >
+              Add Group
+            </button>
+            <button type="button" onClick={fetchGroups} disabled={groupLoading}>
+              Refresh
+            </button>
+          </div>
+          {groupMsg && <div>{groupMsg}</div>}
+        </div>
+        {groups.length === 0 && <div>No groups defined.</div>}
+        {groups.length > 0 && (
+          <table
+            style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}
+          >
+            <thead>
+              <tr>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  Name
+                </th>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  Suffix
+                </th>
+                <th
+                  style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}
+                >
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr key={g.name} style={{ borderBottom: "1px solid #eee" }}>
+                  <td style={{ padding: "4px 6px", fontWeight: 500 }}>
+                    {g.name}
+                  </td>
+                  <td
+                    style={{
+                      padding: "4px 6px",
+                      whiteSpace: "pre-wrap",
+                      maxWidth: 260,
+                    }}
+                  >
+                    {g.suffix
+                      ? g.suffix.length > 120
+                        ? g.suffix.slice(0, 120) + "…"
+                        : g.suffix
+                      : null}
+                  </td>
+                  <td style={{ padding: "4px 6px" }}>
+                    <button onClick={() => handleDeleteGroup(g.name)}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section
