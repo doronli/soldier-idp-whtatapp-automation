@@ -23,9 +23,9 @@ Optional but helpful:
 ## 2) Get the project from GitHub
 
 1. Open Terminal
-2. Run this command (replace YOUR-REPO-URL with the real link):
+2. Run this command
 
-   git clone YOUR-REPO-URL
+   git clone https://github.com/doronli/soldier-idp-whtatapp-automation.git
 
 3. Go into the project folder that was created:
 
