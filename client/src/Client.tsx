@@ -1,92 +1,22 @@
-import { useState, useEffect, useRef } from "react";
-
-interface FailedGroupEntry {
-  group: string;
-  error?: string;
-}
-
-interface ScheduleItem {
-  id: string;
-  runAt: string;
-  status: string;
-  message?: string;
-  error?: string | null;
-  sentGroups?: string[];
-  failedGroups?: FailedGroupEntry[];
-}
-
-interface SessionStatus {
-  loggedIn: boolean;
-  pendingQR: boolean;
-  error?: string;
-}
-
-interface Group {
-  name: string;
-  suffix: string;
-}
+import { useState, useEffect } from "react";
+import type { ScheduleItem, SessionStatus, Group } from "./types";
+import MessageTab from "./components/MessageTab";
+import GroupsTab from "./components/GroupsTab";
 
 function Client() {
-  const [message, setMessage] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  // Scheduling state
-  const [scheduleTime, setScheduleTime] = useState("");
-  const [scheduleStatus, setScheduleStatus] = useState<string | null>(null);
+  // schedules & groups state
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
-
-  // Groups management state
   const [groups, setGroups] = useState<Group[]>([]);
-  const [groupName, setGroupName] = useState("");
-  const [groupSuffix, setGroupSuffix] = useState("");
   const [groupMsg, setGroupMsg] = useState<string | null>(null);
   const [groupLoading, setGroupLoading] = useState(false);
 
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(
     null
   );
+  const [activeTab, setActiveTab] = useState<"messages" | "groups">("messages");
 
   const apiBase = "http://localhost:3000";
-  const messageRef = useRef<HTMLTextAreaElement | null>(null);
-
-  const autoResize = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    const max = 600; // px cap
-    el.style.height = Math.min(el.scrollHeight, max) + "px";
-  };
-
-  const handleSend = async () => {
-    setLoading(true);
-    setStatus(null);
-    try {
-      const res = await fetch(`${apiBase}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        let msg = "✅ " + data.status;
-        const failedGroups: FailedGroupEntry[] = Array.isArray(
-          data.failedGroups
-        )
-          ? data.failedGroups
-          : [];
-        if (failedGroups.length) {
-          const names = failedGroups.map((g) => g.group).join(", ");
-          msg += ` | קבוצות שנכשלו: ${names}`;
-        }
-        setStatus(msg);
-      } else {
-        setStatus("❌ " + (data.error || "שגיאה לא ידועה"));
-      }
-    } catch {
-      setStatus("❌ שגיאת רשת");
-    }
-    setLoading(false);
-  };
 
   const fetchSchedules = async () => {
     try {
@@ -95,7 +25,7 @@ function Client() {
       const data = await res.json();
       if (Array.isArray(data)) setSchedules(data as ScheduleItem[]);
     } catch {
-      // ignore
+      /* ignore */
     } finally {
       setLoadingSchedules(false);
     }
@@ -107,7 +37,7 @@ function Client() {
       const data = await res.json();
       if (Array.isArray(data)) setGroups(data);
     } catch {
-      // ignore
+      /* ignore */
     }
   };
 
@@ -133,84 +63,34 @@ function Client() {
     return () => clearInterval(int);
   }, []);
 
-  useEffect(() => {
-    if (messageRef.current) autoResize(messageRef.current);
-  }, [message]);
-
-  const handleSchedule = async () => {
-    setScheduleStatus(null);
-    if (!scheduleTime) {
-      setScheduleStatus("❌ בחר זמן");
-      return;
-    }
-    try {
-      const local = new Date(scheduleTime);
-      const iso = local.toISOString();
-      const res = await fetch(`${apiBase}/schedule`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, runAt: iso }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setScheduleStatus(
-          `✅ תוזמן מזהה ${data.id} ל-${new Date(data.runAt).toLocaleString(
-            "he-IL"
-          )}`
-        );
-        setMessage("");
-        setScheduleTime("");
-        fetchSchedules();
-      } else {
-        setScheduleStatus("❌ " + (data.error || "נכשל בתזמון"));
-      }
-    } catch {
-      setScheduleStatus("❌ שגיאת רשת");
-    }
-  };
-
-  const cancelSchedule = async (id: string) => {
-    try {
-      const res = await fetch(`${apiBase}/schedule/${id}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        fetchSchedules();
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleAddGroup = async () => {
+  const addGroup = async (name: string, suffix: string) => {
     setGroupMsg(null);
-    if (!groupName.trim()) {
-      setGroupMsg("❌ נדרש שם");
-      return;
-    }
     setGroupLoading(true);
     try {
       const res = await fetch(`${apiBase}/groups`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: groupName, suffix: groupSuffix }),
+        body: JSON.stringify({ name, suffix }),
       });
       const data = await res.json();
       if (res.ok) {
         setGroupMsg(`✅ נוסף '${data.name}'`);
-        setGroupName("");
-        setGroupSuffix("");
-        fetchGroups();
+        return { ok: true, msg: "added" };
       } else {
-        setGroupMsg("❌ " + (data.error || "נכשל"));
+        const msg = "❌ " + (data.error || "נכשל");
+        setGroupMsg(msg);
+        return { ok: false, msg };
       }
     } catch {
-      setGroupMsg("❌ שגיאת רשת");
+      const msg = "❌ שגיאת רשת";
+      setGroupMsg(msg);
+      return { ok: false, msg };
+    } finally {
+      setGroupLoading(false);
     }
-    setGroupLoading(false);
   };
 
-  const handleDeleteGroup = async (name: string) => {
+  const deleteGroup = async (name: string) => {
     if (!confirm(`למחוק את הקבוצה '${name}'?`)) return;
     setGroupMsg(null);
     try {
@@ -226,18 +106,6 @@ function Client() {
       }
     } catch {
       setGroupMsg("❌ שגיאת רשת");
-    }
-  };
-
-  const canSchedule = () => {
-    if (!message.trim() || !scheduleTime) return false;
-    try {
-      const dt = new Date(scheduleTime);
-      if (isNaN(dt.getTime())) return false;
-      if (dt.getTime() - Date.now() < 30000) return false; // <30s
-      return true;
-    } catch {
-      return false;
     }
   };
 
@@ -286,225 +154,62 @@ function Client() {
         </div>
       )}
 
-      <div className="grid">
-        <div className="card full-span">
-          <div className="glow-ring" />
-          <h3>שליחה מיידית ותזמון</h3>
-          <textarea
-            ref={messageRef}
-            placeholder="הזן את ההודעה שלך..."
-            value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-              if (messageRef.current) autoResize(messageRef.current);
-            }}
-            style={{ minHeight: 168, overflow: "hidden" }}
-          />
-          <div className="actions-row" style={{ marginTop: "0.85rem" }}>
-            <button
-              className="button"
-              onClick={handleSend}
-              disabled={loading || !message.trim()}
-            >
-              {loading ? <span className="loader" /> : "שלח עכשיו"}
-            </button>
-            <div className="inline" style={{ flexGrow: 1 }}>
-              <label className="label" style={{ minWidth: 80 }}>
-                זמן תזמון
-              </label>
-              <input
-                type="datetime-local"
-                value={scheduleTime}
-                onChange={(e) => setScheduleTime(e.target.value)}
-              />
-              <button
-                className="button outline"
-                onClick={handleSchedule}
-                disabled={!canSchedule()}
-              >
-                תזמן
-              </button>
-            </div>
-          </div>
-          {status && (
-            <div className="status-line" style={{ marginTop: 12 }}>
-              {status}
-            </div>
-          )}
-          {scheduleStatus && (
-            <div className="status-line" style={{ marginTop: 12 }}>
-              {scheduleStatus}
-            </div>
-          )}
-          <p className="small-note">מרווח מינימלי של 30 שניות לזמן תזמון</p>
-        </div>
-
-        <div className="card">
-          <div className="glow-ring" />
-          <h3>ניהול קבוצות</h3>
-          <input
-            type="text"
-            placeholder="שם הקבוצה"
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            style={{ textAlign: "right" }}
-          />
-          <textarea
-            placeholder="סיומת (אופציונלי, מופיע בשורה חדשה)"
-            value={groupSuffix}
-            onChange={(e) => setGroupSuffix(e.target.value)}
-            style={{ textAlign: "right", minHeight: 90 }}
-          />
-          <div className="actions-row" style={{ marginTop: 10 }}>
-            <button
-              className="button success"
-              onClick={handleAddGroup}
-              disabled={groupLoading || !groupName.trim()}
-            >
-              {groupLoading ? <span className="loader" /> : "הוסף קבוצה"}
-            </button>
-            <button
-              type="button"
-              className="button outline"
-              onClick={fetchGroups}
-              disabled={groupLoading}
-            >
-              רענן
-            </button>
-          </div>
-          {groupMsg && (
-            <div className="status-line" style={{ marginTop: 12 }}>
-              {groupMsg}
-            </div>
-          )}
-          <hr className="separator" />
-          {groups.length === 0 && (
-            <div className="empty-state">לא הוגדרו קבוצות.</div>
-          )}
-          {groups.length > 0 && (
-            <div className="table-wrap" style={{ marginTop: 10 }}>
-              <table className="table rtl">
-                <thead>
-                  <tr>
-                    <th>שם</th>
-                    <th>סיומת</th>
-                    <th>פעולות</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {groups.map((g) => (
-                    <tr key={g.name}>
-                      <td style={{ fontWeight: 600 }}>{g.name}</td>
-                      <td style={{ whiteSpace: "pre-wrap", maxWidth: 220 }}>
-                        {g.suffix
-                          ? g.suffix.length > 120
-                            ? g.suffix.slice(0, 120) + "…"
-                            : g.suffix
-                          : null}
-                      </td>
-                      <td>
-                        <button
-                          className="button danger"
-                          style={{ padding: ".45rem .8rem", fontSize: ".7rem" }}
-                          onClick={() => handleDeleteGroup(g.name)}
-                        >
-                          מחק
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="card">
-          <div className="glow-ring" />
-          <h3>הודעות מתוזמנות</h3>
-          <button
-            className="button outline"
-            onClick={fetchSchedules}
-            disabled={loadingSchedules}
-            style={{ marginBottom: 12 }}
-          >
-            {loadingSchedules ? "מרענן..." : "רענן"}
-          </button>
-          {schedules.length === 0 && (
-            <div className="empty-state">אין תזמונים.</div>
-          )}
-          {schedules.length > 0 && (
-            <div className="table-wrap">
-              <table className="table rtl">
-                <thead>
-                  <tr>
-                    <th>מזהה</th>
-                    <th>זמן הפעלה</th>
-                    <th>סטטוס</th>
-                    <th>פרטים</th>
-                    <th>פעולות</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedules.map((s) => {
-                    const failedList = Array.isArray(s.failedGroups)
-                      ? s.failedGroups
-                      : [];
-                    return (
-                      <tr key={s.id}>
-                        <td>{s.id}</td>
-                        <td>{new Date(s.runAt).toLocaleString("he-IL")}</td>
-                        <td>
-                          {s.status === "pending" ? (
-                            <span className="tag">ממתין</span>
-                          ) : s.status === "sent" ? (
-                            <span className="tag ok">נשלח</span>
-                          ) : s.status === "failed" ? (
-                            <span className="tag fail">נכשל</span>
-                          ) : (
-                            s.status
-                          )}
-                        </td>
-                        <td style={{ maxWidth: 240 }}>
-                          {failedList.length > 0 && (
-                            <span className="tag fail">
-                              נכשל: {failedList.map((f) => f.group).join(", ")}
-                            </span>
-                          )}
-                          {s.status === "sent" &&
-                            failedList.length === 0 &&
-                            s.sentGroups && (
-                              <span className="tag ok">
-                                נשלח ל-{s.sentGroups.length} קבוצות
-                              </span>
-                            )}
-                          {s.status === "failed" &&
-                            failedList.length === 0 &&
-                            s.error && <span title={s.error}>שגיאה</span>}
-                        </td>
-                        <td>
-                          {s.status === "pending" && (
-                            <button
-                              className="button danger"
-                              style={{
-                                padding: ".45rem .8rem",
-                                fontSize: ".65rem",
-                              }}
-                              onClick={() => cancelSchedule(s.id)}
-                            >
-                              בטל
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+      <div
+        style={{
+          marginBottom: "1.5rem",
+          display: "flex",
+          gap: "0.6rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          className={
+            "button outline " + (activeTab === "messages" ? "active" : "")
+          }
+          style={
+            activeTab === "messages"
+              ? { boxShadow: "0 0 0 2px rgba(99,102,241,0.6)" }
+              : {}
+          }
+          onClick={() => setActiveTab("messages")}
+        >
+          הודעות
+        </button>
+        <button
+          className={
+            "button outline " + (activeTab === "groups" ? "active" : "")
+          }
+          style={
+            activeTab === "groups"
+              ? { boxShadow: "0 0 0 2px rgba(99,102,241,0.6)" }
+              : {}
+          }
+          onClick={() => setActiveTab("groups")}
+        >
+          קבוצות
+        </button>
       </div>
+
+      {activeTab === "messages" && (
+        <MessageTab
+          apiBase={apiBase}
+          schedules={schedules}
+          refreshSchedules={fetchSchedules}
+          sessionReady={!!sessionStatus?.loggedIn}
+          loadingSchedules={loadingSchedules}
+        />
+      )}
+
+      {activeTab === "groups" && (
+        <GroupsTab
+          groups={groups}
+          refreshGroups={fetchGroups}
+          addGroup={addGroup}
+          deleteGroup={deleteGroup}
+          groupLoading={groupLoading}
+          groupMsg={groupMsg}
+        />
+      )}
     </div>
   );
 }
