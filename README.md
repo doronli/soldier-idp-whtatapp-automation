@@ -13,7 +13,7 @@ This project automates sending messages to multiple WhatsApp groups using Node.j
 
 ## Setup
 
-### 1. Backend (Automation Server)
+See [Introduction](./introduction.md) for a detailed overview.
 
 1. **Install Node.js** (https://nodejs.org/)
 2. **Install dependencies:**
